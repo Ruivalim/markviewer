@@ -389,11 +389,23 @@ export const themeCompartment = new Compartment();
 // Decorator compartment for theme-aware decorations
 export const decoratorCompartment = new Compartment();
 
+// SpellCheck compartment for dynamic spell check toggling
+export const spellCheckCompartment = new Compartment();
+
 export function getThemeExtension(isDark: boolean, fontSize: number): Extension {
 	return isDark ? [oneDark, createDarkTheme(fontSize)] : [syntaxHighlighting(defaultHighlightStyle, { fallback: true }), createLightTheme(fontSize)];
 }
 
-export function createEditorExtensions(isDark: boolean, onChange: (content: string) => void, onSave?: () => void, fontSize: number = 15): Extension[] {
+export function getSpellCheckExtension(spellCheck: boolean, lang: string = 'pt-BR'): Extension {
+	return EditorView.contentAttributes.of({
+		spellcheck: spellCheck ? 'true' : 'false',
+		autocorrect: 'on',
+		autocapitalize: 'sentences',
+		lang
+	});
+}
+
+export function createEditorExtensions(isDark: boolean, onChange: (content: string) => void, onSave?: () => void, fontSize: number = 15, spellCheck: boolean = true, spellCheckLang: string = 'pt-BR'): Extension[] {
 	const saveKeymap = onSave
 		? keymap.of([
 				{
@@ -449,6 +461,10 @@ export function createEditorExtensions(isDark: boolean, onChange: (content: stri
 			})()
 		),
 		EditorView.lineWrapping,
+
+		// Spell check using browser's native spell check (via compartment for dynamic updates)
+		// Note: spellcheck in Tauri WebView depends on system settings
+		spellCheckCompartment.of(getSpellCheckExtension(spellCheck, spellCheckLang)),
 
 		// Paste handler - convert URLs to markdown links
 		EditorView.domEventHandlers({

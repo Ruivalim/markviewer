@@ -39,21 +39,32 @@ class FilesStore {
 		try {
 			const content = await fileService.readFile(path);
 			const id = crypto.randomUUID();
+			const name = fileService.getFileName(path);
+			const fileType = fileService.getFileType(name);
+			const isCode = fileType === 'code';
+			// Config files (json, yaml, toml) are editable, other code files are read-only
+			const isEditableConfig = fileService.isEditableConfigFile(name);
+
 			const buffer: FileBuffer = {
 				id,
 				path,
-				name: fileService.getFileName(path),
+				name,
 				content,
 				originalContent: content,
-				isDirty: false
+				isDirty: false,
+				fileType,
+				language: isCode ? fileService.getCodeLanguage(name) : undefined,
+				readOnly: isCode && !isEditableConfig // Code files are read-only except config files
 			};
 			this.buffers.push(buffer);
 			this.buffersMap.set(id, buffer);
 			this.activeBufferId = id;
-			recentStore.addRecent(path, fileService.getFileName(path));
+			recentStore.addRecent(path, name);
 
-			// Start watching the file
-			this.watchFile(id, path);
+			// Start watching the file (for non-code files and editable config files)
+			if (!isCode || isEditableConfig) {
+				this.watchFile(id, path);
+			}
 		} catch (error) {
 			console.error('Failed to open file:', error);
 		}
@@ -187,7 +198,8 @@ class FilesStore {
 			name: 'Untitled.md',
 			content: '',
 			originalContent: '',
-			isDirty: false
+			isDirty: false,
+			fileType: 'markdown'
 		};
 		this.buffers.push(buffer);
 		this.buffersMap.set(id, buffer);

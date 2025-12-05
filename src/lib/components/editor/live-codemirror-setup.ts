@@ -12,6 +12,7 @@ import type { StyleConfig } from '$lib/types';
 // Theme compartment for dynamic theme switching
 export const liveThemeCompartment = new Compartment();
 export const liveDecoratorCompartment = new Compartment();
+export const liveSpellCheckCompartment = new Compartment();
 
 // Create decoration that hides syntax markers on inactive lines
 const hiddenDecoration = Decoration.mark({ class: 'cm-md-hidden' });
@@ -253,6 +254,80 @@ class MermaidWidget extends WidgetType {
 	}
 }
 
+// Widget for markdown tables
+class TableWidget extends WidgetType {
+	constructor(
+		readonly tableMarkdown: string,
+		readonly isDark: boolean
+	) {
+		super();
+	}
+
+	toDOM() {
+		const container = document.createElement('div');
+		container.className = 'cm-table-widget';
+
+		const lines = this.tableMarkdown.trim().split('\n');
+		if (lines.length < 2) {
+			container.textContent = this.tableMarkdown;
+			return container;
+		}
+
+		const table = document.createElement('table');
+		table.className = 'cm-rendered-table';
+
+		// Parse header row
+		const headerRow = this.parseRow(lines[0]);
+		if (headerRow.length === 0) {
+			container.textContent = this.tableMarkdown;
+			return container;
+		}
+
+		// Create thead
+		const thead = document.createElement('thead');
+		const headerTr = document.createElement('tr');
+		for (const cell of headerRow) {
+			const th = document.createElement('th');
+			th.textContent = cell.trim();
+			headerTr.appendChild(th);
+		}
+		thead.appendChild(headerTr);
+		table.appendChild(thead);
+
+		// Skip separator line (line 1) and parse body rows
+		const tbody = document.createElement('tbody');
+		for (let i = 2; i < lines.length; i++) {
+			const rowCells = this.parseRow(lines[i]);
+			if (rowCells.length === 0) continue;
+
+			const tr = document.createElement('tr');
+			for (let j = 0; j < headerRow.length; j++) {
+				const td = document.createElement('td');
+				td.textContent = (rowCells[j] || '').trim();
+				tr.appendChild(td);
+			}
+			tbody.appendChild(tr);
+		}
+		table.appendChild(tbody);
+
+		container.appendChild(table);
+		return container;
+	}
+
+	parseRow(line: string): string[] {
+		// Remove leading/trailing pipes and split by |
+		const trimmed = line.trim();
+		if (!trimmed.startsWith('|') || !trimmed.endsWith('|')) {
+			return trimmed.split('|').map(s => s.trim()).filter(s => s);
+		}
+		return trimmed.slice(1, -1).split('|').map(s => s.trim());
+	}
+
+	eq(other: TableWidget) {
+		return other.tableMarkdown === this.tableMarkdown && other.isDark === this.isDark;
+	}
+}
+
 // Create the live markdown decorator
 const createLiveDecorator = (isDark: boolean, basePath: string | null = null) =>
 	ViewPlugin.fromClass(
@@ -437,21 +512,21 @@ const createLiveDecorator = (isDark: boolean, basePath: string | null = null) =>
 // Block decorations must be provided via StateField, not ViewPlugin
 let blockWidgetCounter = 0;
 
-const createBlockWidgetsField = (basePath: string | null) =>
+const createBlockWidgetsField = (basePath: string | null, isDark: boolean) =>
 	StateField.define<DecorationSet>({
 		create(state) {
-			return buildBlockDecorations(state, basePath);
+			return buildBlockDecorations(state, basePath, isDark);
 		},
 		update(decorations, tr) {
 			if (tr.docChanged || tr.selection) {
-				return buildBlockDecorations(tr.state, basePath);
+				return buildBlockDecorations(tr.state, basePath, isDark);
 			}
 			return decorations;
 		},
 		provide: (field) => EditorView.decorations.from(field)
 	});
 
-function buildBlockDecorations(state: import('@codemirror/state').EditorState, basePath: string | null): DecorationSet {
+function buildBlockDecorations(state: import('@codemirror/state').EditorState, basePath: string | null, isDark: boolean): DecorationSet {
 	const decorations: { from: number; decoration: Decoration }[] = [];
 	const selection = state.selection.main;
 	const selectionStartLine = state.doc.lineAt(selection.from).number;
@@ -545,6 +620,31 @@ function buildBlockDecorations(state: import('@codemirror/state').EditorState, b
 					})
 				});
 			}
+		}
+	}
+
+	// Find markdown tables
+	// Table pattern: lines starting with | that have at least one separator row (|---|---|)
+	const tableRegex = /^(\|[^\n]+\|\r?\n\|[-:\s|]+\|\r?\n(?:\|[^\n]+\|\r?\n?)*)/gm;
+
+	while ((match = tableRegex.exec(doc)) !== null) {
+		const tableContent = match[1].trim();
+		const startPos = match.index;
+		const endPos = match.index + match[0].length - 1;
+		const startLine = state.doc.lineAt(startPos).number;
+		const endLine = state.doc.lineAt(endPos).number;
+
+		if (shouldShowWidget(startLine, endLine)) {
+			// Hide the table markdown and show rendered table
+			const lastLineOfTable = state.doc.lineAt(endPos);
+			decorations.push({
+				from: lastLineOfTable.to,
+				decoration: Decoration.widget({
+					widget: new TableWidget(tableContent, isDark),
+					block: true,
+					side: 1
+				})
+			});
 		}
 	}
 
@@ -647,7 +747,16 @@ export function getLiveDecoratorExtension(isDark: boolean, basePath: string | nu
 	return createLiveDecorator(isDark, basePath);
 }
 
-export function createLiveEditorExtensions(isDark: boolean, onChange: (content: string) => void, onSave?: () => void, fontSize: number = 15, basePath: string | null = null): Extension[] {
+export function getLiveSpellCheckExtension(spellCheck: boolean, lang: string = 'pt-BR'): Extension {
+	return EditorView.contentAttributes.of({
+		spellcheck: spellCheck ? 'true' : 'false',
+		autocorrect: 'on',
+		autocapitalize: 'sentences',
+		lang
+	});
+}
+
+export function createLiveEditorExtensions(isDark: boolean, onChange: (content: string) => void, onSave?: () => void, fontSize: number = 15, basePath: string | null = null, spellCheck: boolean = true, spellCheckLang: string = 'pt-BR'): Extension[] {
 	const saveKeymap = onSave
 		? keymap.of([
 				{
@@ -682,8 +791,8 @@ export function createLiveEditorExtensions(isDark: boolean, onChange: (content: 
 		// Live preview decorator (inline decorations)
 		liveDecoratorCompartment.of(createLiveDecorator(isDark, basePath)),
 
-		// Block widgets (images, charts)
-		createBlockWidgetsField(basePath),
+		// Block widgets (images, charts, tables)
+		createBlockWidgetsField(basePath, isDark),
 
 		// Theme
 		liveThemeCompartment.of(getLiveThemeExtension(isDark, fontSize)),
@@ -703,6 +812,10 @@ export function createLiveEditorExtensions(isDark: boolean, onChange: (content: 
 			})()
 		),
 		EditorView.lineWrapping,
+
+		// Spell check using browser's native spell check (via compartment for dynamic updates)
+		// Note: spellcheck in Tauri WebView depends on system settings
+		liveSpellCheckCompartment.of(getLiveSpellCheckExtension(spellCheck, spellCheckLang)),
 
 		// Paste handler - convert URLs to markdown links
 		EditorView.domEventHandlers({

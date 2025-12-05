@@ -60,7 +60,7 @@
 			{/if}
 		</div>
 
-		<div class="relative flex-1 overflow-hidden">
+		<div class="relative min-h-0 flex-1">
 			{#if filesStore.isLoadingFolder}
 				<div class="absolute inset-0 z-10 flex items-center justify-center bg-slate-50/80 dark:bg-slate-900/80">
 					<div class="flex flex-col items-center gap-2">

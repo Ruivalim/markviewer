@@ -3,6 +3,19 @@
   "productName": "MarkViewer",
   "version": "0.1.0",
   "identifier": "com.ruivalim.markviewer",
+  "plugins": {
+    "cli": {
+      "args": [
+        {
+          "name": "path",
+          "index": 1,
+          "takesValue": true,
+          "required": false,
+          "description": "File or folder to open"
+        }
+      ]
+    }
+  },
   "build": {
     "beforeDevCommand": "bun run dev",
     "devUrl": "http://localhost:1420",
@@ -14,7 +27,9 @@
       {
         "title": "MarkViewer",
         "width": 1280,
-        "height": 800
+        "height": 800,
+        "minWidth": 600,
+        "minHeight": 400
       }
     ],
     "security": {

@@ -66,6 +66,50 @@ pub fn highlight_code_block(code: String, lang: String) -> String {
     highlight_code(&code, &lang)
 }
 
+/// Opens a path in the system file manager (Finder on macOS)
+///
+/// # Arguments
+/// * `path` - The path to open (file or directory)
+#[command]
+pub fn open_path(path: String) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    {
+        std::process::Command::new("open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
+    }
+    #[cfg(target_os = "windows")]
+    {
+        std::process::Command::new("explorer")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
+    }
+    #[cfg(target_os = "linux")]
+    {
+        std::process::Command::new("xdg-open")
+            .arg(&path)
+            .spawn()
+            .map_err(|e| format!("Failed to open path: {}", e))?;
+    }
+    Ok(())
+}
+
+/// Opens a file in an external editor
+///
+/// # Arguments
+/// * `command` - The command to run (e.g., "code", "cursor", "neovide")
+/// * `args` - Arguments to pass to the command (usually the file path)
+#[command]
+pub fn open_in_editor(command: String, args: Vec<String>) -> Result<(), String> {
+    std::process::Command::new(&command)
+        .args(&args)
+        .spawn()
+        .map_err(|e| format!("Failed to open in editor '{}': {}", command, e))?;
+    Ok(())
+}
+
 /// Saves image data (base64) to a file and returns the path.
 ///
 /// # Arguments
@@ -121,6 +165,90 @@ pub fn save_pasted_image(
 
     // Return relative path
     Ok(format!("images/{}", file_name))
+}
+
+/// Installs the 'mkv' command in PATH (/usr/local/bin)
+/// This allows users to open files/folders from terminal with: mkv <path>
+#[command]
+pub fn install_cli_command() -> Result<String, String> {
+    #[cfg(target_os = "macos")]
+    {
+        let script_content = r#"#!/bin/bash
+if [ -z "$1" ]; then
+  open /Applications/MarkViewer.app
+else
+  # Convert to absolute path
+  if [[ "$1" = /* ]]; then
+    ABS_PATH="$1"
+  else
+    ABS_PATH="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")"
+  fi
+  open /Applications/MarkViewer.app --args "$ABS_PATH"
+fi
+"#;
+
+        let script_path = "/usr/local/bin/mkv";
+
+        // Use osascript to run with admin privileges
+        let apple_script = format!(
+            r#"do shell script "echo '{}' > {} && chmod +x {}" with administrator privileges"#,
+            script_content.replace("\"", "\\\"").replace("\n", "\\n"),
+            script_path,
+            script_path
+        );
+
+        let output = std::process::Command::new("osascript")
+            .arg("-e")
+            .arg(&apple_script)
+            .output()
+            .map_err(|e| format!("Failed to run installer: {}", e))?;
+
+        if output.status.success() {
+            Ok("Comando 'mkv' instalado com sucesso! Agora você pode usar:\n\n  mkv .          - Abrir pasta atual\n  mkv arquivo.md - Abrir arquivo\n  mkv            - Abrir MarkViewer".to_string())
+        } else {
+            let stderr = String::from_utf8_lossy(&output.stderr);
+            if stderr.contains("User canceled") || stderr.contains("canceled") {
+                Err("Instalação cancelada pelo usuário.".to_string())
+            } else {
+                Err(format!("Falha ao instalar: {}", stderr))
+            }
+        }
+    }
+
+    #[cfg(target_os = "linux")]
+    {
+        let script_content = r#"#!/bin/bash
+if [ -z "$1" ]; then
+  markviewer
+else
+  if [[ "$1" = /* ]]; then
+    ABS_PATH="$1"
+  else
+    ABS_PATH="$(cd "$(dirname "$1")" 2>/dev/null && pwd)/$(basename "$1")"
+  fi
+  markviewer "$ABS_PATH"
+fi
+"#;
+        let script_path = "/usr/local/bin/mkv";
+
+        let output = std::process::Command::new("pkexec")
+            .arg("bash")
+            .arg("-c")
+            .arg(format!("echo '{}' > {} && chmod +x {}", script_content, script_path, script_path))
+            .output()
+            .map_err(|e| format!("Failed to run installer: {}", e))?;
+
+        if output.status.success() {
+            Ok("Comando 'mkv' instalado com sucesso!".to_string())
+        } else {
+            Err(format!("Falha ao instalar: {}", String::from_utf8_lossy(&output.stderr)))
+        }
+    }
+
+    #[cfg(target_os = "windows")]
+    {
+        Err("Instalação automática não suportada no Windows ainda. Adicione o executável ao PATH manualmente.".to_string())
+    }
 }
 
 #[cfg(test)]

@@ -1,5 +1,5 @@
 import { storeService } from '$lib/services/store-service';
-import type { AppSettings, ViewMode } from '$lib/types';
+import type { AppSettings, ViewMode, ExternalEditor } from '$lib/types';
 
 const MIN_FONT_SIZE = 10;
 const MAX_FONT_SIZE = 24;
@@ -13,6 +13,11 @@ class SettingsStore {
 	fontSize = $state(DEFAULT_FONT_SIZE);
 	autoSave = $state(true);
 	autoSaveDelay = $state(2000); // ms
+	focusMode = $state(false);
+	spellCheck = $state(true);
+	spellCheckLanguage = $state<'pt-BR' | 'en-US'>('pt-BR');
+	externalEditor = $state<ExternalEditor>('vscode');
+	customEditorCommand = $state<string | undefined>(undefined);
 
 	async init() {
 		const stored = await storeService.get<AppSettings>('settings');
@@ -23,6 +28,11 @@ class SettingsStore {
 			this.fontSize = stored.fontSize ?? DEFAULT_FONT_SIZE;
 			this.autoSave = stored.autoSave ?? true;
 			this.autoSaveDelay = stored.autoSaveDelay ?? 2000;
+			this.focusMode = stored.focusMode ?? false;
+			this.spellCheck = stored.spellCheck ?? true;
+			this.spellCheckLanguage = stored.spellCheckLanguage ?? 'pt-BR';
+			this.externalEditor = stored.externalEditor ?? 'vscode';
+			this.customEditorCommand = stored.customEditorCommand;
 		}
 		this.applyTheme();
 	}
@@ -84,6 +94,31 @@ class SettingsStore {
 		this.persist();
 	}
 
+	toggleFocusMode() {
+		this.focusMode = !this.focusMode;
+		this.persist();
+	}
+
+	toggleSpellCheck() {
+		this.spellCheck = !this.spellCheck;
+		this.persist();
+	}
+
+	setSpellCheckLanguage(lang: 'pt-BR' | 'en-US') {
+		this.spellCheckLanguage = lang;
+		this.persist();
+	}
+
+	setExternalEditor(editor: ExternalEditor) {
+		this.externalEditor = editor;
+		this.persist();
+	}
+
+	setCustomEditorCommand(command: string) {
+		this.customEditorCommand = command;
+		this.persist();
+	}
+
 	private applyTheme() {
 		if (this.theme === 'dark') {
 			document.documentElement.classList.add('dark');
@@ -101,7 +136,12 @@ class SettingsStore {
 			sidebarWidth: this.sidebarWidth,
 			fontSize: this.fontSize,
 			autoSave: this.autoSave,
-			autoSaveDelay: this.autoSaveDelay
+			autoSaveDelay: this.autoSaveDelay,
+			focusMode: this.focusMode,
+			spellCheck: this.spellCheck,
+			spellCheckLanguage: this.spellCheckLanguage,
+			externalEditor: this.externalEditor,
+			customEditorCommand: this.customEditorCommand
 		});
 	}
 }

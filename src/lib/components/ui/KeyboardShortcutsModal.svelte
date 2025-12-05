@@ -19,6 +19,13 @@
 			]
 		},
 		{
+			category: 'Navegacao',
+			items: [
+				{ keys: ['Cmd', 'K'], description: 'Buscar arquivos' },
+				{ keys: ['Cmd', 'Shift', 'F'], description: 'Modo foco' }
+			]
+		},
+		{
 			category: 'Edicao',
 			items: [
 				{ keys: ['Cmd', 'Z'], description: 'Desfazer' },
@@ -34,7 +41,6 @@
 			items: [
 				{ keys: ['Cmd', 'B'], description: 'Negrito' },
 				{ keys: ['Cmd', 'I'], description: 'Italico' },
-				{ keys: ['Cmd', 'K'], description: 'Inserir link' },
 				{ keys: ['Cmd', '`'], description: 'Codigo inline' }
 			]
 		},
@@ -42,7 +48,7 @@
 			category: 'Visualizacao',
 			items: [
 				{ keys: ['Cmd', 'P'], description: 'Alternar modo de visualizacao' },
-				{ keys: ['Cmd', 'B'], description: 'Alternar sidebar' },
+				{ keys: ['Cmd', '\\'], description: 'Alternar sidebar' },
 				{ keys: ['Cmd', '+'], description: 'Aumentar zoom' },
 				{ keys: ['Cmd', '-'], description: 'Diminuir zoom' },
 				{ keys: ['Cmd', '0'], description: 'Zoom padrao' }

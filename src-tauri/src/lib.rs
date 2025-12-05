@@ -1,13 +1,15 @@
 mod commands;
 mod markdown;
 
-use commands::{highlight_code_block, render_markdown, save_pasted_image};
+use commands::{highlight_code_block, install_cli_command, open_in_editor, open_path, render_markdown, save_pasted_image};
 use tauri::menu::{MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder};
 use tauri::{Emitter, Manager};
+use tauri_plugin_cli::CliExt;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
+        .plugin(tauri_plugin_cli::init())
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_dialog::init())
@@ -101,9 +103,13 @@ pub fn run() {
             let keyboard_shortcuts = MenuItemBuilder::with_id("keyboard_shortcuts", "Atalhos de Teclado")
                 .accelerator("CmdOrCtrl+/")
                 .build(app)?;
+            let install_cli = MenuItemBuilder::with_id("install_cli", "Instalar comando 'mkv' no PATH...")
+                .build(app)?;
 
             let help_menu = SubmenuBuilder::new(app, "Ajuda")
                 .item(&keyboard_shortcuts)
+                .separator()
+                .item(&install_cli)
                 .build()?;
 
             // Window menu
@@ -125,6 +131,23 @@ pub fn run() {
                 .build()?;
 
             app.set_menu(menu)?;
+
+            // Handle CLI arguments
+            if let Ok(matches) = app.cli().matches() {
+                if let Some(path_arg) = matches.args.get("path") {
+                    if let Some(path_str) = path_arg.value.as_str() {
+                        if !path_str.is_empty() {
+                            let path = path_str.to_string();
+                            let window = app.get_webview_window("main").unwrap();
+                            // Emit after a small delay to ensure frontend is ready
+                            std::thread::spawn(move || {
+                                std::thread::sleep(std::time::Duration::from_millis(500));
+                                let _ = window.emit("cli-open", path);
+                            });
+                        }
+                    }
+                }
+            }
 
             // Handle menu events
             app.on_menu_event(move |app_handle, event| {
@@ -166,6 +189,9 @@ pub fn run() {
                     "keyboard_shortcuts" => {
                         let _ = window.emit("menu-event", "keyboard_shortcuts");
                     }
+                    "install_cli" => {
+                        let _ = window.emit("menu-event", "install_cli");
+                    }
                     _ => {}
                 }
             });
@@ -175,7 +201,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             render_markdown,
             highlight_code_block,
-            save_pasted_image
+            save_pasted_image,
+            open_path,
+            open_in_editor,
+            install_cli_command
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

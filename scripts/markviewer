@@ -1,0 +1,62 @@
+#!/bin/bash
+
+# MarkViewer CLI
+# Abre o MarkViewer app, opcionalmente com um arquivo
+
+APP_PATH="/Applications/markviewer.app"
+
+# Usa o app instalado se existir, senao usa o de desenvolvimento
+if [ -d "$APP_PATH" ]; then
+    MARKVIEWER_APP="$APP_PATH"
+else
+    echo "Erro: MarkViewer nao encontrado."
+    echo "Instale em /Applications ou faca build com: bun run tauri build"
+    exit 1
+fi
+
+# Se nenhum argumento, apenas abre o app
+if [ $# -eq 0 ]; then
+    open "$MARKVIEWER_APP"
+    exit 0
+fi
+
+# Processa argumentos
+case "$1" in
+    -h|--help)
+        echo "MarkViewer - Editor de Markdown"
+        echo ""
+        echo "Uso: markviewer [opcoes] [arquivo]"
+        echo ""
+        echo "Opcoes:"
+        echo "  -h, --help      Mostra esta ajuda"
+        echo "  -v, --version   Mostra a versao"
+        echo ""
+        echo "Exemplos:"
+        echo "  markviewer                    # Abre o app"
+        echo "  markviewer README.md          # Abre arquivo"
+        echo "  markviewer ~/docs/notes.md    # Abre com path absoluto"
+        exit 0
+        ;;
+    -v|--version)
+        echo "MarkViewer v0.1.0"
+        exit 0
+        ;;
+    *)
+        # Assume que e um arquivo
+        FILE="$1"
+
+        # Converte para path absoluto se necessario
+        if [[ "$FILE" != /* ]]; then
+            FILE="$(pwd)/$FILE"
+        fi
+
+        # Verifica se o arquivo existe
+        if [ ! -f "$FILE" ]; then
+            echo "Erro: Arquivo nao encontrado: $FILE"
+            exit 1
+        fi
+
+        # Abre o app com o arquivo
+        open -a "$MARKVIEWER_APP" "$FILE"
+        ;;
+esac

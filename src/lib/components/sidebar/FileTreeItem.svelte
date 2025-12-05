@@ -15,13 +15,15 @@
 		if (node.isDirectory) {
 			await filesStore.toggleFolderExpanded(node);
 		} else {
-			if (fileService.isMarkdownFile(node.name)) {
+			if (fileService.isSupportedFile(node.name)) {
 				await filesStore.openFile(node.path);
 			}
 		}
 	}
 
 	const isMarkdown = $derived(fileService.isMarkdownFile(node.name));
+	const isTextFile = $derived(fileService.isTextFile(node.name));
+	const isSupportedFile = $derived(fileService.isSupportedFile(node.name));
 	const gitStatus = $derived(filesStore.getFileGitStatus(node.path));
 
 	const gitStatusColor = $derived.by(() => {
@@ -43,7 +45,7 @@
 		class="flex w-full items-center gap-1 rounded px-2 py-1 text-left text-sm transition-colors hover:bg-slate-200 dark:hover:bg-slate-700"
 		style="padding-left: {depth * 12 + 8}px"
 		onclick={handleClick}
-		class:opacity-50={!node.isDirectory && !isMarkdown}
+		class:opacity-50={!node.isDirectory && !isSupportedFile}
 	>
 		{#if node.isDirectory}
 			<span class="flex-shrink-0 text-slate-500">
@@ -62,11 +64,11 @@
 			</span>
 		{:else}
 			<span class="w-[14px]"></span>
-			<span class="flex-shrink-0" class:text-cyan-500={isMarkdown} class:text-slate-400={!isMarkdown}>
+			<span class="flex-shrink-0" class:text-cyan-500={isMarkdown} class:text-emerald-500={isTextFile} class:text-slate-400={!isSupportedFile}>
 				<File size={16} />
 			</span>
 		{/if}
-		<span class="truncate {gitStatusColor}" class:text-slate-400={!node.isDirectory && !isMarkdown && !gitStatus}>
+		<span class="truncate {gitStatusColor}" class:text-slate-400={!node.isDirectory && !isSupportedFile && !gitStatus}>
 			{node.name}
 		</span>
 

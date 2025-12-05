@@ -1,7 +1,12 @@
 <script lang="ts">
-	import { FileText, FolderOpen, Plus, Clock, Folder } from 'lucide-svelte';
+	import { FileText, FolderOpen, Plus, Clock, Folder, ExternalLink, Trash2 } from 'lucide-svelte';
 	import { filesStore } from '$lib/stores/files.svelte';
 	import { recentStore } from '$lib/stores/recent.svelte';
+	import ContextMenu from '$lib/components/ui/ContextMenu.svelte';
+
+	let contextMenu = $state<{ x: number; y: number; type: 'file' | 'folder'; path: string } | null>(
+		null
+	);
 
 	function formatDate(timestamp: number): string {
 		const date = new Date(timestamp);
@@ -22,6 +27,48 @@
 	async function openRecentFolder(path: string) {
 		await filesStore.openFolderPath(path);
 	}
+
+	function handleContextMenu(e: MouseEvent, type: 'file' | 'folder', path: string) {
+		e.preventDefault();
+		contextMenu = { x: e.clientX, y: e.clientY, type, path };
+	}
+
+	async function openInFinder(path: string, isFolder: boolean) {
+		const { invoke } = await import('@tauri-apps/api/core');
+		try {
+			// Get the folder path (parent directory for files)
+			const folderPath = isFolder ? path : path.substring(0, path.lastIndexOf('/'));
+			await invoke('open_path', { path: folderPath });
+		} catch (error) {
+			console.error('Failed to open in Finder:', error);
+		}
+	}
+
+	function removeFromRecent(type: 'file' | 'folder', path: string) {
+		if (type === 'file') {
+			recentStore.removeRecent(path);
+		} else {
+			recentStore.removeRecentFolder(path);
+		}
+	}
+
+	let contextMenuItems = $derived.by(() => {
+		if (!contextMenu) return [];
+		const isFolder = contextMenu.type === 'folder';
+		return [
+			{
+				label: isFolder ? 'Abrir no Finder' : 'Mostrar no Finder',
+				icon: ExternalLink,
+				action: () => openInFinder(contextMenu!.path, isFolder)
+			},
+			{
+				label: 'Remover dos Recentes',
+				icon: Trash2,
+				action: () => removeFromRecent(contextMenu!.type, contextMenu!.path),
+				destructive: true
+			}
+		];
+	});
 </script>
 
 <div class="flex h-full flex-col items-center justify-center bg-gradient-to-br from-slate-50 to-slate-100 dark:from-slate-900 dark:to-slate-800">
@@ -65,6 +112,7 @@
 						<button
 							class="group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
 							onclick={() => openRecentFile(file.path)}
+							oncontextmenu={(e) => handleContextMenu(e, 'file', file.path)}
 							title={file.path}
 						>
 							<FileText size={14} class="flex-shrink-0 text-slate-400 group-hover:text-cyan-500" />
@@ -92,6 +140,7 @@
 						<button
 							class="group flex w-full items-center gap-2 rounded px-2 py-1 text-left text-sm transition-colors hover:bg-slate-100 dark:hover:bg-slate-800"
 							onclick={() => openRecentFolder(folder.path)}
+							oncontextmenu={(e) => handleContextMenu(e, 'folder', folder.path)}
 							title={folder.path}
 						>
 							<FolderOpen size={14} class="flex-shrink-0 text-slate-400 group-hover:text-amber-500" />
@@ -113,3 +162,7 @@
 		<p class="text-sm text-slate-400 dark:text-slate-500">Nenhum arquivo ou pasta recente</p>
 	{/if}
 </div>
+
+{#if contextMenu}
+	<ContextMenu items={contextMenuItems} x={contextMenu.x} y={contextMenu.y} onClose={() => (contextMenu = null)} />
+{/if}

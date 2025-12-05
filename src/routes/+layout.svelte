@@ -1,6 +1,7 @@
 <script lang="ts">
 	import '../app.css';
 	import { onMount } from 'svelte';
+	import { getCurrentWindow } from '@tauri-apps/api/window';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { recentStore } from '$lib/stores/recent.svelte';
 	import { stylesStore } from '$lib/stores/styles.svelte';
@@ -9,9 +10,14 @@
 	let { children } = $props();
 
 	onMount(async () => {
-		await settingsStore.init();
-		await recentStore.init();
-		await stylesStore.init();
+		try {
+			await settingsStore.init();
+			await recentStore.init();
+			await stylesStore.init();
+		} finally {
+			// Mostra a janela mesmo se algo falhar na inicialização
+			await getCurrentWindow().show();
+		}
 	});
 </script>
 

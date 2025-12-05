@@ -2,7 +2,7 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { EditorView } from '@codemirror/view';
 	import { EditorState } from '@codemirror/state';
-	import { createEditorExtensions, themeCompartment, getThemeExtension } from './codemirror-setup';
+	import { createEditorExtensions, themeCompartment, getThemeExtension, spellCheckCompartment, getSpellCheckExtension } from './codemirror-setup';
 	import { filesStore } from '$lib/stores/files.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { invoke } from '@tauri-apps/api/core';
@@ -12,6 +12,7 @@
 	let currentBufferId: string | null = null;
 	let currentTheme: 'light' | 'dark' | null = null;
 	let currentFontSize: number | null = null;
+	let currentSpellCheck: boolean | null = null;
 
 	function handleChange(content: string) {
 		const bufferId = untrack(() => filesStore.activeBufferId);
@@ -80,14 +81,14 @@
 		}
 	}
 
-	function createEditor(content: string, theme: 'light' | 'dark', fontSize: number) {
+	function createEditor(content: string, theme: 'light' | 'dark', fontSize: number, spellCheck: boolean, spellCheckLang: string) {
 		if (view) {
 			view.destroy();
 		}
 
 		const state = EditorState.create({
 			doc: content,
-			extensions: createEditorExtensions(theme === 'dark', handleChange, handleSave, fontSize)
+			extensions: createEditorExtensions(theme === 'dark', handleChange, handleSave, fontSize, spellCheck, spellCheckLang)
 		});
 
 		view = new EditorView({
@@ -97,16 +98,38 @@
 
 		currentTheme = theme;
 		currentFontSize = fontSize;
+		currentSpellCheck = spellCheck;
 	}
 
 	onMount(() => {
 		const buffer = filesStore.activeBuffer;
 		const theme = settingsStore.theme;
 		const fontSize = settingsStore.fontSize;
+		const spellCheck = settingsStore.spellCheck;
+		const spellCheckLang = settingsStore.spellCheckLanguage;
 		if (buffer) {
 			currentBufferId = buffer.id;
-			createEditor(buffer.content, theme, fontSize);
+			createEditor(buffer.content, theme, fontSize, spellCheck, spellCheckLang);
 		}
+
+		// ResizeObserver to handle fullscreen and window resize
+		const resizeObserver = new ResizeObserver(() => {
+			if (view) {
+				view.requestMeasure();
+			}
+		});
+		resizeObserver.observe(editorContainer);
+
+		// Also observe window resize for fullscreen height changes
+		function handleWindowResize() {
+			if (view) {
+				// Small delay to let layout settle
+				requestAnimationFrame(() => {
+					view?.requestMeasure();
+				});
+			}
+		}
+		window.addEventListener('resize', handleWindowResize);
 
 		// Listen for outline navigation
 		function handleOutlineNavigate(e: CustomEvent<{ line: number }>) {
@@ -219,13 +242,15 @@
 		window.addEventListener('outline-navigate', handleOutlineNavigate as EventListener);
 		window.addEventListener('editor-format', handleFormat as EventListener);
 		window.addEventListener('editor-insert-text', handleInsertText as EventListener);
-		editorContainer.addEventListener('paste', handlePaste as EventListener);
+		editorContainer.addEventListener('paste', handlePaste as unknown as EventListener);
 
 		return () => {
 			window.removeEventListener('outline-navigate', handleOutlineNavigate as EventListener);
 			window.removeEventListener('editor-format', handleFormat as EventListener);
 			window.removeEventListener('editor-insert-text', handleInsertText as EventListener);
-			editorContainer.removeEventListener('paste', handlePaste as EventListener);
+			window.removeEventListener('resize', handleWindowResize);
+			editorContainer.removeEventListener('paste', handlePaste as unknown as EventListener);
+			resizeObserver.disconnect();
 		};
 	});
 
@@ -243,9 +268,11 @@
 			const buffer = untrack(() => filesStore.buffers.find((b) => b.id === bufferId));
 			const theme = untrack(() => settingsStore.theme);
 			const fontSize = untrack(() => settingsStore.fontSize);
+			const spellCheck = untrack(() => settingsStore.spellCheck);
+			const spellCheckLang = untrack(() => settingsStore.spellCheckLanguage);
 			if (buffer) {
 				currentBufferId = bufferId;
-				createEditor(buffer.content, theme, fontSize);
+				createEditor(buffer.content, theme, fontSize, spellCheck, spellCheckLang);
 			}
 		}
 	});
@@ -263,6 +290,19 @@
 			});
 			currentTheme = theme;
 			currentFontSize = fontSize;
+		}
+	});
+
+	// Effect for spell check toggle and language change
+	$effect(() => {
+		const spellCheck = settingsStore.spellCheck;
+		const spellCheckLang = settingsStore.spellCheckLanguage;
+
+		if (view) {
+			view.dispatch({
+				effects: spellCheckCompartment.reconfigure(getSpellCheckExtension(spellCheck, spellCheckLang))
+			});
+			currentSpellCheck = spellCheck;
 		}
 	});
 </script>

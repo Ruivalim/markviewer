@@ -4,7 +4,7 @@
 	import { FolderOpen } from 'lucide-svelte';
 </script>
 
-<div class="file-tree flex-1 overflow-auto p-2">
+<div class="file-tree h-full overflow-y-auto p-2">
 	{#if filesStore.fileTree.length > 0}
 		{#each filesStore.fileTree as node (node.path)}
 			<FileTreeItem {node} />

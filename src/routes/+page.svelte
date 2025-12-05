@@ -11,14 +11,18 @@
 	import WelcomeScreen from '$lib/components/welcome/WelcomeScreen.svelte';
 	import PdfExportModal from '$lib/components/pdf/PdfExportModal.svelte';
 	import ConfirmDialog from '$lib/components/ui/ConfirmDialog.svelte';
-	import StyleSettingsModal from '$lib/components/settings/StyleSettingsModal.svelte';
+	import SettingsModal from '$lib/components/settings/SettingsModal.svelte';
 	import KeyboardShortcutsModal from '$lib/components/ui/KeyboardShortcutsModal.svelte';
+	import CommandPalette from '$lib/components/ui/CommandPalette.svelte';
+	import CodeViewer from '$lib/components/code/CodeViewer.svelte';
+	import ConfigEditor from '$lib/components/code/ConfigEditor.svelte';
 	import { filesStore } from '$lib/stores/files.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 
 	let showPdfModal = $state(false);
-	let showStyleSettings = $state(false);
+	let showSettings = $state(false);
 	let showKeyboardShortcuts = $state(false);
+	let showCommandPalette = $state(false);
 	let isDragging = $state(false);
 	let pendingCloseBufferId = $state<string | null>(null);
 
@@ -28,6 +32,14 @@
 		if (!id) return '';
 		const buffer = filesStore.buffers.find((b) => b.id === id);
 		return buffer?.content ?? '';
+	});
+
+	// Derived state for file type
+	let previewFileType = $derived.by(() => {
+		const id = filesStore.activeBufferId;
+		if (!id) return 'markdown' as const;
+		const buffer = filesStore.buffers.find((b) => b.id === id);
+		return buffer?.fileType ?? 'markdown';
 	});
 
 	function requestCloseBuffer(id: string) {
@@ -52,6 +64,18 @@
 
 	// Image extensions for drag-drop support
 	const imageExtensions = ['.png', '.jpg', '.jpeg', '.gif', '.webp', '.svg', '.bmp', '.ico'];
+
+	async function installCliCommand() {
+		const { invoke } = await import('@tauri-apps/api/core');
+		const { message } = await import('@tauri-apps/plugin-dialog');
+
+		try {
+			const result = await invoke<string>('install_cli_command');
+			await message(result, { title: 'Sucesso', kind: 'info' });
+		} catch (error) {
+			await message(String(error), { title: 'Erro', kind: 'error' });
+		}
+	}
 
 	/**
 	 * Calculate relative path from the current .md file to the dropped image
@@ -84,6 +108,7 @@
 		let unlistenDragEnter: (() => void) | undefined;
 		let unlistenDragLeave: (() => void) | undefined;
 		let unlistenMenu: (() => void) | undefined;
+		let unlistenCli: (() => void) | undefined;
 
 		(async () => {
 			const { listen } = await import('@tauri-apps/api/event');
@@ -133,6 +158,9 @@
 					case 'keyboard_shortcuts':
 						showKeyboardShortcuts = true;
 						break;
+					case 'install_cli':
+						installCliCommand();
+						break;
 				}
 			});
 
@@ -140,11 +168,18 @@
 				isDragging = false;
 				const paths = event.payload.paths;
 
+				// Text file extensions for drag-drop support
+				const textExtensions = ['.txt', '.text', '.log'];
+
 				for (const path of paths) {
 					const ext = path.toLowerCase().substring(path.lastIndexOf('.'));
 
 					// Markdown files - open them
 					if (ext === '.md' || ext === '.markdown') {
+						await filesStore.openFile(path);
+					}
+					// Text files - open them
+					else if (textExtensions.includes(ext)) {
 						await filesStore.openFile(path);
 					}
 					// Image files - insert as markdown image
@@ -165,6 +200,25 @@
 			unlistenDragLeave = await listen('tauri://drag-leave', () => {
 				isDragging = false;
 			});
+
+			// CLI arguments - open file or folder passed via command line
+			unlistenCli = await listen<string>('cli-open', async (event) => {
+				const path = event.payload;
+				if (!path) return;
+
+				// Check if it's a directory or file
+				const { stat } = await import('@tauri-apps/plugin-fs');
+				try {
+					const info = await stat(path);
+					if (info.isDirectory) {
+						await filesStore.openFolderPath(path);
+					} else {
+						await filesStore.openFile(path);
+					}
+				} catch (error) {
+					console.error('Failed to open path from CLI:', error);
+				}
+			});
 		})();
 
 		return () => {
@@ -172,6 +226,7 @@
 			unlistenDragEnter?.();
 			unlistenDragLeave?.();
 			unlistenMenu?.();
+			unlistenCli?.();
 		};
 	});
 
@@ -213,27 +268,56 @@
 			e.preventDefault();
 			settingsStore.resetZoom();
 		}
+		// Cmd+K: Open command palette (if multiple buffers or folder open)
+		if ((e.metaKey || e.ctrlKey) && e.key === 'k') {
+			e.preventDefault();
+			if (filesStore.buffers.length > 0 || filesStore.openFolder) {
+				showCommandPalette = true;
+			}
+		}
+		// Cmd+Shift+F: Toggle focus mode
+		if ((e.metaKey || e.ctrlKey) && e.shiftKey && e.key === 'f') {
+			e.preventDefault();
+			settingsStore.toggleFocusMode();
+		}
+		// Escape: Exit focus mode
+		if (e.key === 'Escape' && settingsStore.focusMode) {
+			e.preventDefault();
+			settingsStore.toggleFocusMode();
+		}
 	}
 </script>
 
 <svelte:window onkeydown={handleKeydown} />
 
 <div class="flex h-full flex-col bg-white text-slate-900 dark:bg-slate-950 dark:text-slate-100">
-	<TopBar onExportPdf={() => (showPdfModal = true)} onOpenStyleSettings={() => (showStyleSettings = true)} />
+	{#if !settingsStore.focusMode}
+		<TopBar onExportPdf={() => (showPdfModal = true)} onOpenSettings={() => (showSettings = true)} />
+	{/if}
 
 	<div class="flex flex-1 overflow-hidden">
-		{#if settingsStore.sidebarVisible}
+		{#if settingsStore.sidebarVisible && !settingsStore.focusMode}
 			<Sidebar />
 		{/if}
 
 		<main class="flex flex-1 flex-col overflow-hidden">
-			{#if filesStore.buffers.length > 0}
+			{#if filesStore.buffers.length > 0 && !settingsStore.focusMode}
 				<TabBar onCloseBuffer={requestCloseBuffer} />
 			{/if}
 
 			<div class="flex flex-1 flex-col overflow-hidden">
 				{#if filesStore.activeBuffer}
-					{#if settingsStore.viewMode === 'edit'}
+					{#if filesStore.activeBuffer.fileType === 'code' && filesStore.activeBuffer.readOnly}
+						<!-- Code file: read-only viewer -->
+						<CodeViewer
+							content={filesStore.activeBuffer.content}
+							language={filesStore.activeBuffer.language ?? 'plaintext'}
+							filePath={filesStore.activeBuffer.path}
+						/>
+					{:else if filesStore.activeBuffer.fileType === 'code' && !filesStore.activeBuffer.readOnly}
+						<!-- Config file (JSON, YAML, TOML): editable with syntax highlighting -->
+						<ConfigEditor />
+					{:else if settingsStore.viewMode === 'edit'}
 						<EditorToolbar />
 						<div class="flex-1 overflow-hidden">
 							<Editor />
@@ -245,7 +329,7 @@
 							<LiveEditor />
 						</div>
 					{:else if settingsStore.viewMode === 'preview'}
-						<Preview content={previewContent} />
+						<Preview content={previewContent} fileType={previewFileType} />
 					{:else}
 						<!-- Split view -->
 						<EditorToolbar />
@@ -254,7 +338,7 @@
 								<Editor />
 							</div>
 							<div class="h-full w-1/2 overflow-auto">
-								<Preview content={previewContent} />
+								<Preview content={previewContent} fileType={previewFileType} />
 							</div>
 						</div>
 					{/if}
@@ -263,10 +347,19 @@
 				{/if}
 			</div>
 
-			<StatusBar />
+			{#if !settingsStore.focusMode}
+				<StatusBar />
+			{/if}
 		</main>
 	</div>
 </div>
+
+<!-- Focus mode indicator -->
+{#if settingsStore.focusMode}
+	<div class="fixed bottom-4 right-4 z-40 rounded-lg bg-slate-800/90 px-3 py-1.5 text-xs text-slate-400 shadow-lg">
+		<kbd class="rounded bg-slate-700 px-1.5 py-0.5 font-mono text-slate-300">Esc</kbd> para sair do Focus Mode
+	</div>
+{/if}
 
 <!-- Drag overlay -->
 {#if isDragging}
@@ -282,7 +375,7 @@
 	<PdfExportModal content={filesStore.activeBuffer.content} onClose={() => (showPdfModal = false)} />
 {/if}
 
-<StyleSettingsModal open={showStyleSettings} onClose={() => (showStyleSettings = false)} />
+<SettingsModal open={showSettings} onClose={() => (showSettings = false)} />
 
 <KeyboardShortcutsModal open={showKeyboardShortcuts} onClose={() => (showKeyboardShortcuts = false)} />
 
@@ -318,3 +411,5 @@
 		/>
 	{/if}
 {/if}
+
+<CommandPalette open={showCommandPalette} onClose={() => (showCommandPalette = false)} />

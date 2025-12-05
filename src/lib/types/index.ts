@@ -1,3 +1,14 @@
+export type FileType = 'markdown' | 'text' | 'code' | 'log';
+
+// Supported code languages for syntax highlighting
+export type CodeLanguage =
+	| 'javascript' | 'typescript' | 'jsx' | 'tsx'
+	| 'python' | 'rust' | 'go' | 'java' | 'c' | 'cpp' | 'csharp'
+	| 'html' | 'css' | 'scss' | 'json' | 'yaml' | 'toml'
+	| 'bash' | 'shell' | 'sql' | 'graphql'
+	| 'svelte' | 'vue' | 'php' | 'ruby' | 'swift' | 'kotlin'
+	| 'dockerfile' | 'makefile' | 'plaintext';
+
 export interface FileBuffer {
 	id: string;
 	path: string | null;
@@ -5,6 +16,11 @@ export interface FileBuffer {
 	content: string;
 	originalContent: string;
 	isDirty: boolean;
+	fileType: FileType;
+	/** For code files - the language for syntax highlighting */
+	language?: CodeLanguage;
+	/** Code files are read-only by default */
+	readOnly?: boolean;
 }
 
 export interface FileTreeNode {
@@ -27,6 +43,8 @@ export interface RecentFolder {
 	openedAt: number;
 }
 
+export type ExternalEditor = 'vscode' | 'cursor' | 'neovide' | 'terminal' | 'custom';
+
 export interface AppSettings {
 	theme: 'light' | 'dark';
 	sidebarVisible: boolean;
@@ -34,6 +52,13 @@ export interface AppSettings {
 	fontSize: number;
 	autoSave: boolean;
 	autoSaveDelay: number;
+	focusMode: boolean;
+	spellCheck: boolean;
+	spellCheckLanguage: 'pt-BR' | 'en-US';
+	/** Preferred external editor for code files */
+	externalEditor: ExternalEditor;
+	/** Custom command for external editor (when externalEditor is 'custom') */
+	customEditorCommand?: string;
 }
 
 export type ViewMode = 'edit' | 'preview' | 'split' | 'live';

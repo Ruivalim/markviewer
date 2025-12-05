@@ -9,7 +9,7 @@
 	import { onMount, onDestroy, untrack } from 'svelte';
 	import { EditorView } from '@codemirror/view';
 	import { EditorState } from '@codemirror/state';
-	import { createLiveEditorExtensions, liveThemeCompartment, getLiveThemeExtension, liveDecoratorCompartment, getLiveDecoratorExtension } from './live-codemirror-setup';
+	import { createLiveEditorExtensions, liveThemeCompartment, getLiveThemeExtension, liveDecoratorCompartment, getLiveDecoratorExtension, liveSpellCheckCompartment, getLiveSpellCheckExtension } from './live-codemirror-setup';
 	import { filesStore } from '$lib/stores/files.svelte';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { fileService } from '$lib/services/file-service';
@@ -20,6 +20,7 @@
 	let currentBufferId: string | null = null;
 	let currentTheme: 'light' | 'dark' | null = null;
 	let currentFontSize: number | null = null;
+	let currentSpellCheck: boolean | null = null;
 	let errorMessage = $state<string | null>(null);
 	let errorTimeout: ReturnType<typeof setTimeout> | null = null;
 
@@ -175,14 +176,14 @@
 		filesStore.saveActiveBuffer();
 	}
 
-	function createEditor(content: string, theme: 'light' | 'dark', fontSize: number, basePath: string | null) {
+	function createEditor(content: string, theme: 'light' | 'dark', fontSize: number, basePath: string | null, spellCheck: boolean, spellCheckLang: string) {
 		if (view) {
 			view.destroy();
 		}
 
 		const state = EditorState.create({
 			doc: content,
-			extensions: createLiveEditorExtensions(theme === 'dark', handleChange, handleSave, fontSize, basePath)
+			extensions: createLiveEditorExtensions(theme === 'dark', handleChange, handleSave, fontSize, basePath, spellCheck, spellCheckLang)
 		});
 
 		view = new EditorView({
@@ -192,20 +193,41 @@
 
 		currentTheme = theme;
 		currentFontSize = fontSize;
+		currentSpellCheck = spellCheck;
 	}
 
 	onMount(() => {
 		const buffer = filesStore.activeBuffer;
 		const theme = settingsStore.theme;
 		const fontSize = settingsStore.fontSize;
+		const spellCheck = settingsStore.spellCheck;
+		const spellCheckLang = settingsStore.spellCheckLanguage;
 
 		if (buffer) {
 			currentBufferId = buffer.id;
-			createEditor(buffer.content, theme, fontSize, buffer.path);
+			createEditor(buffer.content, theme, fontSize, buffer.path, spellCheck, spellCheckLang);
 		}
 
 		// Register click handler for links (Cmd/Ctrl+click)
 		editorContainer.addEventListener('click', handleLinkClick, true);
+
+		// ResizeObserver to handle fullscreen and window resize
+		const resizeObserver = new ResizeObserver(() => {
+			if (view) {
+				view.requestMeasure();
+			}
+		});
+		resizeObserver.observe(editorContainer);
+
+		// Also observe window resize for fullscreen height changes
+		function handleWindowResize() {
+			if (view) {
+				requestAnimationFrame(() => {
+					view?.requestMeasure();
+				});
+			}
+		}
+		window.addEventListener('resize', handleWindowResize);
 
 		// Listen for formatting commands from EditorToolbar
 		function handleFormat(e: CustomEvent<{ format: string; extra?: string }>) {
@@ -310,6 +332,8 @@
 			editorContainer.removeEventListener('click', handleLinkClick, true);
 			window.removeEventListener('editor-format', handleFormat as EventListener);
 			window.removeEventListener('editor-insert-text', handleInsertText as EventListener);
+			window.removeEventListener('resize', handleWindowResize);
+			resizeObserver.disconnect();
 		};
 	});
 
@@ -330,9 +354,11 @@
 			const buffer = untrack(() => filesStore.buffers.find((b) => b.id === bufferId));
 			const theme = untrack(() => settingsStore.theme);
 			const fontSize = untrack(() => settingsStore.fontSize);
+			const spellCheck = untrack(() => settingsStore.spellCheck);
+			const spellCheckLang = untrack(() => settingsStore.spellCheckLanguage);
 			if (buffer) {
 				currentBufferId = bufferId;
-				createEditor(buffer.content, theme, fontSize, buffer.path);
+				createEditor(buffer.content, theme, fontSize, buffer.path, spellCheck, spellCheckLang);
 			}
 		}
 	});
@@ -349,6 +375,19 @@
 			});
 			currentTheme = theme;
 			currentFontSize = fontSize;
+		}
+	});
+
+	// Effect for spell check toggle and language change
+	$effect(() => {
+		const spellCheck = settingsStore.spellCheck;
+		const spellCheckLang = settingsStore.spellCheckLanguage;
+
+		if (view) {
+			view.dispatch({
+				effects: liveSpellCheckCompartment.reconfigure(getLiveSpellCheckExtension(spellCheck, spellCheckLang))
+			});
+			currentSpellCheck = spellCheck;
 		}
 	});
 </script>
@@ -553,5 +592,55 @@
 		border-radius: 8px;
 		color: #ef4444;
 		font-size: 0.875em;
+	}
+
+	/* Table widget */
+	.live-editor :global(.cm-table-widget) {
+		display: block;
+		padding: 16px 0;
+		overflow-x: auto;
+	}
+
+	.live-editor :global(.cm-rendered-table) {
+		width: 100%;
+		border-collapse: collapse;
+		font-size: 0.9em;
+		border-radius: 8px;
+		overflow: hidden;
+	}
+
+	.live-editor :global(.cm-rendered-table th) {
+		background: rgba(6, 182, 212, 0.15);
+		color: #06b6d4;
+		font-weight: 600;
+		text-align: left;
+		padding: 10px 14px;
+		border-bottom: 2px solid rgba(6, 182, 212, 0.3);
+	}
+
+	.live-editor :global(.cm-rendered-table td) {
+		padding: 10px 14px;
+		border-bottom: 1px solid rgba(148, 163, 184, 0.2);
+	}
+
+	.live-editor :global(.cm-rendered-table tbody tr:hover) {
+		background: rgba(6, 182, 212, 0.05);
+	}
+
+	.live-editor :global(.cm-rendered-table tbody tr:last-child td) {
+		border-bottom: none;
+	}
+
+	/* Dark mode adjustments */
+	:global(.dark) .live-editor :global(.cm-rendered-table th) {
+		background: rgba(6, 182, 212, 0.1);
+	}
+
+	:global(.dark) .live-editor :global(.cm-rendered-table td) {
+		border-bottom-color: rgba(71, 85, 105, 0.5);
+	}
+
+	:global(.dark) .live-editor :global(.cm-rendered-table tbody tr:hover) {
+		background: rgba(6, 182, 212, 0.08);
 	}
 </style>

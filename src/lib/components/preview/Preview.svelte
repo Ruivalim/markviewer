@@ -2,6 +2,7 @@
 	import { markdownService, type SpecialBlock } from '$lib/services/markdown-service';
 	import { mermaidService } from '$lib/services/mermaid-service';
 	import { chartService } from '$lib/services/chart-service';
+	import { logParser } from '$lib/services/log-parser';
 	import { fileService } from '$lib/services/file-service';
 	import { settingsStore } from '$lib/stores/settings.svelte';
 	import { filesStore } from '$lib/stores/files.svelte';
@@ -9,12 +10,15 @@
 	import { onDestroy, tick } from 'svelte';
 	import { convertFileSrc } from '@tauri-apps/api/core';
 	import { openUrl } from '@tauri-apps/plugin-opener';
+	import { invoke } from '@tauri-apps/api/core';
+	import type { FileType } from '$lib/types';
 
 	interface Props {
 		content: string;
+		fileType?: FileType;
 	}
 
-	let { content }: Props = $props();
+	let { content, fileType = 'markdown' }: Props = $props();
 
 	// State for rendered content
 	let html = $state('');
@@ -54,19 +58,35 @@
 		const currentContent = content;
 		const theme = settingsStore.theme;
 		const basePath = filesStore.activeBuffer?.path ?? null;
+		const currentFileType = fileType;
 
 		if (debounceTimer) clearTimeout(debounceTimer);
 
 		debounceTimer = setTimeout(async () => {
 			try {
-				const result = await markdownService.render(currentContent, basePath, theme);
-				// Convert local file paths to asset:// protocol
-				html = convertLocalFilePaths(result.html);
-				specialBlocks = result.special_blocks;
+				if (currentFileType === 'log') {
+					// For log files, use the structured log renderer
+					html = logParser.parseAndRender(currentContent);
+					specialBlocks = [];
+				} else if (currentFileType === 'text') {
+					// For text files, render as syntax-highlighted code block
+					const highlighted = await invoke<string>('highlight_code_block', {
+						code: currentContent,
+						lang: 'txt'
+					});
+					html = `<pre class="text-file-preview"><code>${highlighted}</code></pre>`;
+					specialBlocks = [];
+				} else {
+					// For markdown files, use the full markdown renderer
+					const result = await markdownService.render(currentContent, basePath, theme);
+					// Convert local file paths to asset:// protocol
+					html = convertLocalFilePaths(result.html);
+					specialBlocks = result.special_blocks;
 
-				// Wait for DOM update, then render special blocks
-				await tick();
-				await renderSpecialBlocks(theme);
+					// Wait for DOM update, then render special blocks
+					await tick();
+					await renderSpecialBlocks(theme);
+				}
 			} catch (error) {
 				console.error('Preview render error:', error);
 				html = `<pre>${escapeHtml(currentContent)}</pre>`;
@@ -621,5 +641,242 @@
 	}
 	:global(.dark) .preview :global(span.punctuation) {
 		color: #e1e4e8;
+	}
+
+	/* Text file preview styles */
+	.preview :global(.text-file-preview) {
+		background: var(--code-block-bg, var(--tw-prose-pre-bg));
+		padding: 1.5em;
+		border-radius: 8px;
+		overflow-x: auto;
+		margin: 0;
+		min-height: 100%;
+	}
+
+	.preview :global(.text-file-preview code) {
+		background: transparent;
+		padding: 0;
+		border-radius: 0;
+		font-size: 0.9em;
+		line-height: 1.7;
+		font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+		color: var(--tw-prose-pre-code);
+		white-space: pre-wrap;
+		word-break: break-word;
+	}
+
+	/* Log viewer styles */
+	.preview :global(.log-viewer) {
+		font-family: ui-monospace, SFMono-Regular, 'SF Mono', Menlo, Consolas, monospace;
+		font-size: 0.875rem;
+		line-height: 1.5;
+	}
+
+	.preview :global(.log-empty) {
+		color: #64748b;
+		padding: 2rem;
+		text-align: center;
+	}
+
+	.preview :global(.log-entry) {
+		padding: 0.75rem 1rem;
+		border-radius: 8px;
+		margin-bottom: 0.5rem;
+		border-left: 3px solid transparent;
+		background: rgba(100, 100, 100, 0.05);
+	}
+
+	:global(.dark) .preview :global(.log-entry) {
+		background: rgba(100, 100, 100, 0.1);
+	}
+
+	/* Level-specific styles */
+	.preview :global(.log-level-info) {
+		border-left-color: #3b82f6;
+	}
+
+	.preview :global(.log-level-warn) {
+		border-left-color: #f59e0b;
+		background: rgba(245, 158, 11, 0.08);
+	}
+
+	:global(.dark) .preview :global(.log-level-warn) {
+		background: rgba(245, 158, 11, 0.12);
+	}
+
+	.preview :global(.log-level-error),
+	.preview :global(.log-level-fatal) {
+		border-left-color: #ef4444;
+		background: rgba(239, 68, 68, 0.08);
+	}
+
+	:global(.dark) .preview :global(.log-level-error),
+	:global(.dark) .preview :global(.log-level-fatal) {
+		background: rgba(239, 68, 68, 0.12);
+	}
+
+	.preview :global(.log-level-debug) {
+		border-left-color: #8b5cf6;
+		background: rgba(139, 92, 246, 0.08);
+	}
+
+	:global(.dark) .preview :global(.log-level-debug) {
+		background: rgba(139, 92, 246, 0.12);
+	}
+
+	.preview :global(.log-level-trace) {
+		border-left-color: #6b7280;
+		background: rgba(107, 114, 128, 0.08);
+	}
+
+	:global(.dark) .preview :global(.log-level-trace) {
+		background: rgba(107, 114, 128, 0.12);
+	}
+
+	.preview :global(.log-header) {
+		display: flex;
+		align-items: center;
+		gap: 0.75rem;
+		flex-wrap: wrap;
+	}
+
+	.preview :global(.log-icon) {
+		font-size: 1rem;
+	}
+
+	.preview :global(.log-timestamp) {
+		color: #64748b;
+		font-size: 0.8rem;
+	}
+
+	:global(.dark) .preview :global(.log-timestamp) {
+		color: #94a3b8;
+	}
+
+	.preview :global(.log-module) {
+		color: #06b6d4;
+		font-weight: 600;
+		font-size: 0.8rem;
+		padding: 0.125rem 0.5rem;
+		background: rgba(6, 182, 212, 0.15);
+		border-radius: 4px;
+	}
+
+	.preview :global(.log-level-badge) {
+		font-size: 0.7rem;
+		font-weight: 700;
+		padding: 0.125rem 0.375rem;
+		border-radius: 4px;
+		text-transform: uppercase;
+		letter-spacing: 0.025em;
+	}
+
+	.preview :global(.log-level-info .log-level-badge) {
+		background: rgba(59, 130, 246, 0.2);
+		color: #3b82f6;
+	}
+
+	:global(.dark) .preview :global(.log-level-info .log-level-badge) {
+		background: rgba(59, 130, 246, 0.3);
+		color: #60a5fa;
+	}
+
+	.preview :global(.log-level-warn .log-level-badge) {
+		background: rgba(245, 158, 11, 0.2);
+		color: #d97706;
+	}
+
+	:global(.dark) .preview :global(.log-level-warn .log-level-badge) {
+		background: rgba(245, 158, 11, 0.3);
+		color: #fbbf24;
+	}
+
+	.preview :global(.log-level-error .log-level-badge),
+	.preview :global(.log-level-fatal .log-level-badge) {
+		background: rgba(239, 68, 68, 0.2);
+		color: #dc2626;
+	}
+
+	:global(.dark) .preview :global(.log-level-error .log-level-badge),
+	:global(.dark) .preview :global(.log-level-fatal .log-level-badge) {
+		background: rgba(239, 68, 68, 0.3);
+		color: #f87171;
+	}
+
+	.preview :global(.log-level-debug .log-level-badge) {
+		background: rgba(139, 92, 246, 0.2);
+		color: #7c3aed;
+	}
+
+	:global(.dark) .preview :global(.log-level-debug .log-level-badge) {
+		background: rgba(139, 92, 246, 0.3);
+		color: #a78bfa;
+	}
+
+	.preview :global(.log-level-trace .log-level-badge) {
+		background: rgba(107, 114, 128, 0.2);
+		color: #4b5563;
+	}
+
+	:global(.dark) .preview :global(.log-level-trace .log-level-badge) {
+		background: rgba(107, 114, 128, 0.3);
+		color: #9ca3af;
+	}
+
+	.preview :global(.log-level-unknown .log-level-badge) {
+		background: rgba(107, 114, 128, 0.15);
+		color: #6b7280;
+	}
+
+	.preview :global(.log-message) {
+		margin-top: 0.5rem;
+		color: #334155;
+		font-weight: 500;
+	}
+
+	:global(.dark) .preview :global(.log-message) {
+		color: #e2e8f0;
+	}
+
+	.preview :global(.log-metadata) {
+		margin-top: 0.5rem;
+		padding-left: 0.5rem;
+	}
+
+	.preview :global(.log-meta-item) {
+		display: flex;
+		gap: 0.25rem;
+		color: #64748b;
+		font-size: 0.8rem;
+	}
+
+	:global(.dark) .preview :global(.log-meta-item) {
+		color: #94a3b8;
+	}
+
+	.preview :global(.log-meta-prefix) {
+		color: #94a3b8;
+		user-select: none;
+	}
+
+	:global(.dark) .preview :global(.log-meta-prefix) {
+		color: #64748b;
+	}
+
+	.preview :global(.log-meta-key) {
+		color: #8b5cf6;
+		font-weight: 500;
+	}
+
+	:global(.dark) .preview :global(.log-meta-key) {
+		color: #a78bfa;
+	}
+
+	.preview :global(.log-meta-value) {
+		color: #475569;
+	}
+
+	:global(.dark) .preview :global(.log-meta-value) {
+		color: #cbd5e1;
 	}
 </style>
