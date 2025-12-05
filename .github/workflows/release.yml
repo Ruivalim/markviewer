@@ -2,22 +2,48 @@ name: Release
 
 on:
   push:
-    tags:
-      - 'v*'
+    branches:
+      - main
   workflow_dispatch:
 
 jobs:
-  build-macos:
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - target: aarch64-apple-darwin
-            runner: macos-latest
-          - target: x86_64-apple-darwin
-            runner: macos-latest
+  check-version:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      should_release: ${{ steps.check_tag.outputs.should_release }}
 
-    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version from package.json
+        id: get_version
+        run: |
+          VERSION=$(node -p "require('./package.json').version")
+          echo "version=v$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Check if tag exists
+        id: check_tag
+        run: |
+          if git rev-parse "${{ steps.get_version.outputs.version }}" >/dev/null 2>&1; then
+            echo "Tag ${{ steps.get_version.outputs.version }} already exists"
+            echo "should_release=false" >> $GITHUB_OUTPUT
+          else
+            echo "Tag ${{ steps.get_version.outputs.version }} does not exist"
+            echo "should_release=true" >> $GITHUB_OUTPUT
+          fi
+
+  build-macos:
+    needs: check-version
+    if: needs.check-version.outputs.should_release == 'true'
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    env:
+      TARGET: aarch64-apple-darwin
 
     steps:
       - name: Checkout repository
@@ -29,12 +55,12 @@ jobs:
           bun-version: latest
 
       - name: Setup Rust
-        uses: dtolnay/rust-action@stable
+        uses: dtolnay/rust-toolchain@stable
         with:
-          targets: ${{ matrix.target }}
+          targets: ${{ env.TARGET }}
 
       - name: Install Rust target
-        run: rustup target add ${{ matrix.target }}
+        run: rustup target add ${{ env.TARGET }}
 
       - name: Install frontend dependencies
         run: bun install
@@ -44,15 +70,15 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
         with:
-          tagName: ${{ github.ref_name }}
-          releaseName: 'MarkViewer ${{ github.ref_name }}'
+          tagName: ${{ needs.check-version.outputs.version }}
+          releaseName: 'MarkViewer ${{ needs.check-version.outputs.version }}'
           releaseBody: 'See the assets to download and install this version.'
           releaseDraft: true
           prerelease: false
-          args: --target ${{ matrix.target }}
+          args: --target ${{ env.TARGET }}
 
   publish-release:
-    needs: build-macos
+    needs: [check-version, build-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write
@@ -67,7 +93,7 @@ jobs:
               repo: context.repo.repo,
             });
 
-            const draftRelease = releases.find(r => r.draft && r.tag_name === '${{ github.ref_name }}');
+            const draftRelease = releases.find(r => r.draft && r.tag_name === '${{ needs.check-version.outputs.version }}');
 
             if (draftRelease) {
               await github.rest.repos.updateRelease({
